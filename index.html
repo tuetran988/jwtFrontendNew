@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.3.4/axios.min.js"></script>
+  </head>
+  <body>
+    <button id="_login">Login</button>
+    <button id="_getlist">GetList</button>
+  </body>
+  <script>
+    //tạo ra  instance axios
+    const instance = axios.create({
+      baseURL: "/api", //http://localhost:3000/api
+      timeout: 3 * 1000, //miliseconds
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    //xử lý dữ liệu trước khi request xuống server
+    instance.interceptors.request.use(
+      async (config) => {
+        //config là mấy biến trong axios.create như baseurl, timeout...
+        if (
+          config.url.indexOf("/login") >= 0 ||
+          config.url.indexOf("/refreshToken") >= 0
+        ) {
+          return config;
+        }
+        // trước khi request bất cứ 1 cái gì xuống server thì ta phải gửi kèm theo 1 accessToken
+        const token = await instance.getLocalAccessToken();
+        config.headers["X-Token"] = token;
+        return config;
+      },
+      (err) => {
+        return Promise.reject(err);
+      }
+    );
+    //xử lý data sau khi server response và trước khi client nhận được
+    instance.interceptors.response.use(
+      async (response) => {
+        console.log("sau khi response", response.data);
+        const config = response.config;
+        if (
+          config.url.indexOf("/login") >= 0 ||
+          config.url.indexOf("/refreshToken") >= 0
+        ) {
+          return response;
+        }
+        const { code, msg } = response.data;
+        if (code && code === 401) {
+          if (msg && msg === "jwt expired") {
+            console.log("truong hop token het han",msg);
+            //step1 lấy token mới từ refresh token trả về
+            const {elements:{accessToken}} = await refreshToken();
+            if(accessToken){
+              //step2 thêm lại vào header để vào request tiếp
+              config.headers["X-Token"] = accessToken;
+              //step3  cập nhật accesstoken vào local
+              await instance.setLocalAccessToken(accessToken);
+              return instance(config);
+            }
+          }
+        }
+
+        return response;
+      },
+      (err) => {
+        return Promise.reject(err);
+      }
+    );
+
+    //// function
+    async function login() {
+      return (await instance.get("/login")).data; ///instance đại diện cho 1 axios
+    }
+    async function getUsers() {
+      return (await instance.get("/users")).data;
+    }
+    async function refreshToken() {
+      return (await instance.get("/refreshToken")).data; ///instance đại dien cho 1 axios
+    }
+
+    instance.setLocalAccessToken = async (accessToken) => {
+      window.localStorage.setItem("accessToken", accessToken);
+    };
+    instance.getLocalAccessToken = async () => {
+      return window.localStorage.getItem("accessToken")
+        ? window.localStorage.getItem("accessToken")
+        : null;
+    };
+
+    const btn_login = document.getElementById("_login");
+    if (btn_login) {
+      btn_login.addEventListener("click", async () => {
+        const {
+          status,
+          elements: { token, refreshToken },
+        } = await login();
+        if (status === "success") {
+          //set token and timeExpired in cookies|localStorage
+          await instance.setLocalAccessToken(token);
+        }
+      });
+    }
+
+    const btn_getList = document.getElementById("_getlist");
+    if (btn_getList) {
+      btn_getList.addEventListener("click", async () => {
+        const { status, elements } = await getUsers();
+        console.table(status, elements);
+      });
+    }
+  </script>
+</html>
